@@ -1,0 +1,69 @@
+
+#include <winres.h>
+//#include <windows.h>
+//#include <commctrl.h>
+#include <richedit.h>
+#include "resource.h"
+
+
+
+
+//
+// Dialog resources
+//
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+IDD_DLGMAIN DIALOGEX 0, 0, 681, 102
+STYLE DS_MODALFRAME | DS_SHELLFONT | WS_CAPTION | WS_MINIMIZEBOX | WS_POPUP | WS_SYSMENU
+EXSTYLE WS_EX_TOPMOST
+CAPTION "Text Imput Spell"
+FONT 8, "MS Shell Dlg", 400, 0, 1
+{
+    CONTROL         "", IDC_REDIT1, RICHEDIT_CLASS, WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL, 35, 87, 605, 14, WS_EX_CLIENTEDGE
+        PUSHBUTTON      "Send", IDC_BTADDLIST, 641, 87, 22, 14, 0, WS_EX_LEFT
+        PUSHBUTTON      "Capture", IDC_CAPTURE, 3, 87, 30, 14, 0, WS_EX_LEFT
+        PUSHBUTTON      "Exit", IDCANCEL, 663, 87, 16, 14, 0, WS_EX_LEFT
+        LISTBOX         IDC_LIST, 1, 0, 679, 84, WS_TABSTOP | WS_HSCROLL | WS_VSCROLL | LBS_NOINTEGRALHEIGHT | LBS_NOTIFY, WS_EX_LEFT
+}
+
+
+
+//
+// Icon resources
+//
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+IDI_ICON1          ICON           ".\\newPt.ico"
+
+
+
+//
+// Version Information resources
+//
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     1, 0, 0, 1
+PRODUCTVERSION  1, 0, 0, 1
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+FILESUBTYPE     VFT2_UNKNOWN
+FILEFLAGSMASK   VS_FF_DEBUG | VS_FF_PRERELEASE | VS_FF_PATCHED | VS_FF_PRIVATEBUILD | VS_FF_INFOINFERRED | VS_FF_SPECIALBUILD
+FILEFLAGS       0
+{
+    BLOCK "StringFileInfo"
+    {
+        BLOCK "040904B0"
+        {
+            VALUE "CompanyName", "LaszloSoft Solutions"
+                VALUE "FileDescription", "Text Input spellchecker"
+                VALUE "FileVersion", "1.0.0.1"
+                VALUE "InternalName", "TextInputSpell.exe"
+                VALUE "LegalCopyright", "Copyright (C) 2020"
+                VALUE "OriginalFilename", "TextInputSpell.exe"
+                VALUE "ProductName", "Paltalk Text Spell "
+                VALUE "ProductVersion", "1.0.0.1"
+        }
+    }
+    BLOCK "VarFileInfo"
+    {
+        VALUE "Translation", 0x0409, 0x04B0
+    }
+}
