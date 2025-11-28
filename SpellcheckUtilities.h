@@ -4,11 +4,16 @@
 #include <cwctype>
 #include <richole.h>
 
-bool SpellCheckAndSuggest(wchar_t* wcRawWord);
+// Forward declaration of the spell checker handle
+
+// Forward declaration of the SpellCheckAndSuggest function
+extern bool SpellCheckAndSuggest(wchar_t* wcRawWord);
 
 // Utility: Retrieve the last word before the caret in an Edit control  
 inline void RetrieveLastWord(HWND hEdit)
 {
+	if (!hEdit) return;
+    
     DWORD selStart = 0, selEnd = 0;
     SendMessage(hEdit, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
 
@@ -43,8 +48,17 @@ inline void RetrieveLastWord(HWND hEdit)
 // Utility: find and replace FIRST occurrence
 inline BOOL RichEdit_FindAndReplace(HWND hRich, LPCWSTR oldWord, LPCWSTR newWord)
 {
+	LONG lenOld = lstrlenW(oldWord);
+	LONG curPos = 0;
+	LONG startPos = 0;
+
+	// Get current selection position
+	SendMessageW(hRich, EM_GETSEL, (WPARAM)0, (LPARAM)&curPos);
+	startPos = curPos - lenOld;
+
+   	// Set up the FINDTEXTEX structure
     FINDTEXTEXW ft = { 0 };
-    ft.chrg.cpMin = 0;        // search from start
+    ft.chrg.cpMin = startPos;  // search from start
     ft.chrg.cpMax = -1;       // until end
     ft.lpstrText = oldWord;   // word to find
 
@@ -58,6 +72,7 @@ inline BOOL RichEdit_FindAndReplace(HWND hRich, LPCWSTR oldWord, LPCWSTR newWord
 
     // Replace it
     SendMessageW(hRich, EM_REPLACESEL, TRUE, (LPARAM)newWord);
+
 
     return TRUE;
 }

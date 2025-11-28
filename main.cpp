@@ -2,6 +2,7 @@
 /* (c) 2024 Hairy Soft Solutions */
 /*********************************/
 #include "main.h"
+#include <algorithm>
 using namespace std;
 
 // Global Variables
@@ -62,6 +63,7 @@ char szDic[MAX_PATH] = { 0 };
 // Global for Hungspell 
 BOOL gbDoSpell = TRUE;
 BOOL gbPushPt = TRUE;
+bool gbHunspellInited = false;
 // Global for Clipboard 
 BOOL gbClipActive = FALSE;
 BOOL gbClip2Richedit = FALSE;
@@ -82,6 +84,7 @@ BOOL LoadFileToList(HWND hwList);
 static void TrimWhitespace(std::wstring& str);
 void OnClipboardUpdate(void);
 void OnClipboardMenu(void);
+static bool FileExistsA(const char* path);
 
 // UIAutomation and Dot Mic User related functions
 HRESULT __stdcall InitUIAutomation(void);
@@ -100,9 +103,17 @@ BOOL SendNick2Richedit(void);
 
 // Hunspell functions
 BOOL InitHunspell(void);
-BOOL CheckSpelling(void);
-
+bool SpellCheckAndSuggest(wchar_t* wcRawWord);
 BOOL LookupWebDictionary(void);
+//BOOL AppendWordToPersonalDic(const wchar_t* wword);
+void AppendToPersonalDic(const std::wstring& word);
+std::wstring GetExeDirectory(void);
+std::wstring GetPersonalDicPath(void);
+std::vector<std::string> LoadPersonalDictionary(const std::wstring& file);
+std::string WideToUtf8(const std::wstring& w);
+std::wstring Utf8ToWide(const std::string& s);
+
+
 LRESULT CALLBACK EditLoadSubClassProc(HWND hWnd, UINT msg, WPARAM wParam,
 	LPARAM lParam, UINT_PTR uIdSubClass,
 	DWORD_PTR dwRefData);
@@ -182,7 +193,13 @@ BOOL CALLBACK DlgMain(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		if (!InitHunspell())
 		{
 			gbDoSpell = false;
-			MessageBoxA(ghMain, "Hungspell dll load failed!", "test spelling", MB_OK);
+			gbHunspellInited = false;
+			MessageBoxA(ghMain, "Hungspell Engin Fail, No Spelling!", "Hunspell Module", MB_OK);
+		}
+		else
+		{
+			gbHunspellInited = true;
+			//MessageBoxA(ghMain, "Hungspell Engin Initialized!", "Hunspell Module", MB_OK);
 		}
 		// Setting up event mask for rich edit control
 		SendMessage(ghRichEdit, EM_SETEVENTMASK, 0,
@@ -215,7 +232,7 @@ BOOL CALLBACK DlgMain(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		{
 			MSGFILTER* mf = (MSGFILTER*)lParam;
 
-			if (mf->msg == WM_CHAR)
+			if (gbHunspellInited  &&  gbDoSpell && mf->msg == WM_CHAR )
 			{
 				wchar_t ch = (wchar_t)mf->wParam;
 
@@ -335,7 +352,7 @@ BOOL CALLBACK DlgMain(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		case IDM_LOADFILE:
 		{
 			if (!LoadFileToList(ghList))
-				msga("Error Loading File!");
+			 msga("Error Loading File!");
 		}
 		return TRUE;
 		case IDM_CLIPBRD:
@@ -482,12 +499,20 @@ void CreateContextMenu(WPARAM wParam, LPARAM lparam)
 
 }
 
+// Helper: check for existence of an ANSI file path
+static bool FileExistsA(const char* path)
+{
+	DWORD attr = GetFileAttributesA(path);
+	return (attr != INVALID_FILE_ATTRIBUTES) && !(attr & FILE_ATTRIBUTE_DIRECTORY);
+}
+
 //Hungspell functions definitions
 BOOL InitHunspell(void)
 {
 	hinsDll = LoadLibraryA("libhunspell.dll");
 	if (!hinsDll) 
 	{
+		msga("Hungspell DLL not faund!");
 		OutputDebugStringA("Hungspell DLL Load Failed!\n");	
 		return false;
 	}
@@ -501,10 +526,20 @@ BOOL InitHunspell(void)
 
 	if (pDllHunspellCreate && pDllHunspellDestroy && pDllHunspellSpell && pDllHunspellSuggest && pDllHunspellFreeList)
 	{
-		hSpell = pDllHunspellCreate(szAff, szDic);
-		if (!hSpell)
+		// checking if dictionary files are present
+		if (FileExistsA(szAff) == false || FileExistsA(szDic) == false)
 		{
-			OutputDebugStringA("Dictionary file not found!\n");
+			msga("Dictionary files not found!");
+			OutputDebugStringA("Dictionary files not found!\n");
+			FreeLibrary(hinsDll);
+			return false;
+		}
+		
+		hSpell = pDllHunspellCreate(szAff, szDic);
+		if (!hSpell)	
+		{
+			msga("Hungspell Create Handle Failed!");
+			OutputDebugStringA("Hungspell Create Handle Failed!\n");
 			FreeLibrary(hinsDll);
 			return false;
 		}
@@ -515,195 +550,25 @@ BOOL InitHunspell(void)
 		return false;
 	}
 
+	// Loading personal dictionary words
+
+	std::wstring pesonalDicPath = GetPersonalDicPath();	
+	std::vector<std::string> wordsInDic = LoadPersonalDictionary(pesonalDicPath);
+	for (const auto& word : wordsInDic)
+	{
+		pDllHunspellAdd(hSpell, const_cast<char*>(word.c_str()));
+	}
+
 	return true;
 }
 
-/// using HungSpellChecker DLL
-BOOL CheckSpelling(void)
-{
-	LONG dwWordStart = 0;
-	LONG dwWordEnd = 0;
-	LONG dwCurPos = 0;
-	LONG dwWordLen = 0;
-	wchar_t szRawWord[256] = { '\0' };
-	FINDTEXTW stFindtext;
-	wchar_t szSpace[] = L" ";
-
-	SendMessageW(ghRichEdit, EM_GETSEL, 0, (LPARAM)&dwCurPos); // Getting curser position
-	dwWordEnd = dwCurPos; // this is the last letter before the space added
-	stFindtext.chrg.cpMax = 0;
-	stFindtext.chrg.cpMin = dwWordEnd;
-	stFindtext.lpstrText = szSpace;
-	dwWordStart = (LONG)SendMessageW(ghRichEdit, EM_FINDTEXT, 0, (LPARAM)&stFindtext);
-	if (dwWordStart == -1) dwWordStart = 0; // The word is at very start of the text box
-	else dwWordStart += 1; // Space not add yet, we have to account for it
-	dwWordLen = dwWordEnd - dwWordStart;
-	if (dwWordLen < 2) return FALSE; // Too short to spell
-	if (dwWordLen > 100) return FALSE; // Too long word something wrong
-	// Get the word
-	SendMessageW(ghRichEdit, EM_SETSEL, (WPARAM)dwWordStart, (LPARAM)dwWordEnd);
-	SendMessageW(ghRichEdit, EM_GETSELTEXT, 0, (LPARAM)szRawWord);
-	// MessageBoxA(ghMain, szRawWord, "spell checking", MB_OK);
-	// Checking for :) ;) :P :| :@ :* :O
-	if ((wcslen(szRawWord) == 2) && (wcsncmp(szRawWord, L":", 1) == 0 || wcsncmp(szRawWord, L";", 1) == 0))
-	{
-		SendMessageW(ghRichEdit, EM_SETSEL, (WPARAM)dwCurPos, (LPARAM)dwCurPos);
-		return FALSE;
-	}
-
-	bool bQt = false; // See if any quotes or punctuations
-	wchar_t szSch[] = L"\"([{"; // Quote marks at the start of word
-	for (UINT e = 0; e < 2; e++)
-	{
-		for (UINT ii = 0; ii < wcslen(szSch); ii++)
-		{
-			if (szRawWord[e] == szSch[ii])
-			{
-				dwWordStart += 1;
-				bQt = true;
-				break;
-			}
-		}
-	}
-
-	// Looking for quotes and punctuations at end of the word
-	int iRawLen = wcslen(szRawWord) - 1;
-	wchar_t szEch[] = L"\".,:;?!)]}"; // Quote and punctuation marks at the end
-
-	for (UINT f = 0; f < 3; f++)
-	{
-		for (UINT i = 0; i < wcslen(szEch); i++)
-		{
-			if (szRawWord[iRawLen - f] == szEch[i])
-			{
-				dwWordEnd -= 1;
-				bQt = true;
-				break;
-			}
-		}
-	}
-
-
-	if (bQt) // have to get the word again but without decoration :-)
-	{
-		SendMessageW(ghRichEdit, EM_SETSEL, (WPARAM)dwWordStart, (LPARAM)dwWordEnd);
-		SendMessageW(ghRichEdit, EM_GETSELTEXT, 0, (LPARAM)szRawWord);
-	}
-
-	// Checking for URL, if we find, no need to spell it, exit with false
-	if (wcsncmp(szRawWord, L"http://", 7) == 0 || wcsncmp(szRawWord, L"www.", 4) == 0)
-	{
-		SendMessageA(ghRichEdit, EM_SETSEL, (WPARAM)dwCurPos, (LPARAM)dwCurPos);
-		return FALSE;
-	}
-
-	// Now we have a clean word, try spelling
-	char szRawStr[512] = { 0 };
-	size_t stRet;
-	const wchar_t* pszRawWord = szRawWord;
-
-	wcsrtombs_s(&stRet, szRawStr, 512, &pszRawWord, _TRUNCATE, 0);
-
-	int iSpellRes = pDllHunspellSpell(hSpell, szRawStr);
-	if (iSpellRes != 0) // correct spelling chugging along
-	{
-		SendMessageA(ghRichEdit, EM_SETSEL, (WPARAM)dwCurPos, (LPARAM)dwCurPos);
-		return TRUE;
-	}
-	// Try to get some suggestions
-	char** pwsSugList = NULL;
-	int iSug = pDllHunspellSuggest(hSpell, &pwsSugList, szRawStr);
-	if (iSug == 0) // No suggestion beep and continue
-	{
-		Beep(900, 200);
-		SendMessageA(ghRichEdit, EM_SETSEL, (WPARAM)dwCurPos, (LPARAM)dwCurPos);
-		return FALSE;
-	}
-	// if we got this far we have a list of suggestions, lets make a menu
-	HMENU hSpellMenu = NULL;
-	UINT uiMenuID = 1;
-	wchar_t wsMenuText[256] = { 0 };
-
-	hSpellMenu = CreatePopupMenu();
-	swprintf_s(wsMenuText, 255, L"Add: %s", szRawWord);
-	AppendMenuW(hSpellMenu, MF_STRING, 9991, wsMenuText);
-	swprintf_s(wsMenuText, 255, L"Look Up: %s", szRawWord);
-	AppendMenuW(hSpellMenu, MF_STRING, 9992, wsMenuText);
-	AppendMenuW(hSpellMenu, MF_STRING, 9993, L"Ignore and Continue");
-	// Now we list the suggestions
-	wchar_t wcSugItem[256] = { 0 };
-
-	for (int i = 0; i < iSug; i++, uiMenuID++)
-	{
-		char* pszItem = pwsSugList[i];
-		const char* ppszItem = pszItem;
-
-		mbstate_t state = {0};
-		mbsrtowcs_s(&stRet, wcSugItem, &ppszItem, 255, &state);
-
-		AppendMenuW(hSpellMenu, MF_STRING, uiMenuID, wcSugItem);
-	}
-	// Display the menu
-	RECT rctMain = { 0 };
-	GetWindowRect(ghMain, &rctMain);
-	POINT pt;
-	pt.x = rctMain.left = rctMain.left + ((rctMain.right - rctMain.left ) / 2);
-	pt.y = rctMain.top;
-	//GetCursorPos(&pt);
-	UINT uiSelect = TrackPopupMenu(hSpellMenu, TPM_NONOTIFY | TPM_RETURNCMD, pt.x, pt.y, 0, ghRichEdit, NULL);
-	// See what has been selected
-	if (uiSelect == 9991) // Add the word to dict and continue
-	{
-		pDllHunspellAdd(hSpell, szRawStr);
-		SendMessageW(ghRichEdit, EM_SETSEL, (WPARAM)dwCurPos, (LPARAM)dwCurPos);
-	}
-	else if (uiSelect == 9992) // Look up the word on the Internet
-	{
-		LookupWebDictionary();
-		SendMessageW(ghRichEdit, EM_SETSEL, (WPARAM)dwCurPos, (LPARAM)dwCurPos);
-	}
-	else if (uiSelect == 9993) // Just ignore it
-	{
-		SendMessageW(ghRichEdit, EM_SETSEL, (WPARAM)dwCurPos, (LPARAM)dwCurPos);
-	}
-	else if (uiSelect > 0) // We have a word selected
-	{
-		uiSelect -= 1;
-		DWORD dwElen = strlen(pwsSugList[uiSelect]) - strlen(szRawStr);
-		DWORD dwNpos = dwCurPos + dwElen;
-		char* pszItem = pwsSugList[uiSelect];
-		const char* ppszItem = pszItem;
-		mbstate_t state = { 0 };
-		mbsrtowcs_s(&stRet, wcSugItem, &ppszItem, 255, &state);
-		SendMessageW(ghRichEdit, EM_REPLACESEL, (WPARAM)TRUE, (LPARAM)wcSugItem);
-		SendMessageW(ghRichEdit, EM_SETSEL, (WPARAM)dwNpos, (LPARAM)dwNpos);
-	}
-	else
-	{
-		SendMessageW(ghRichEdit, EM_SETSEL, (WPARAM)dwCurPos, (LPARAM)dwCurPos);
-	}
-
-	if (hSpellMenu)
-	{
-		DestroyMenu(hSpellMenu);
-		hSpellMenu = NULL;
-	}
-	pDllHunspellFreeList(hSpell, &pwsSugList, iSug);
-
-	//MessageBox(ghMain, szRawWord, TEXT("spell checking"), MB_OK);
-
-	return TRUE;
-
-}
-
-
+// Using HungSpellChecker DLL with wchar_t string
 bool SpellCheckAndSuggest(wchar_t* wcRawWord)
 {
 
 	LONG lngCurPos = 0;
 	// Getting curser position
 	SendMessageW(ghRichEdit, EM_GETSEL, 0, (LPARAM)&lngCurPos);
-
 
 	// Checking for URL, if we find, no need to spell it, exit with false
 	if (wcsncmp(wcRawWord, L"http://", 7) == 0 || wcsncmp(wcRawWord, L"www.", 4) == 0)
@@ -738,13 +603,13 @@ bool SpellCheckAndSuggest(wchar_t* wcRawWord)
 	HMENU hSpellMenu = NULL;
 	UINT uiMenuID = 1;
 	wchar_t wsMenuText[256] = { 0 };
-
+	// Create the menu for suggestions
 	hSpellMenu = CreatePopupMenu();
+	AppendMenuW(hSpellMenu, MF_STRING, 9993, L"Ignore and Continue");
 	swprintf_s(wsMenuText, 255, L"Add: %s", wcRawWord);
 	AppendMenuW(hSpellMenu, MF_STRING, 9991, wsMenuText);
 	swprintf_s(wsMenuText, 255, L"Look Up: %s", wcRawWord);
 	AppendMenuW(hSpellMenu, MF_STRING, 9992, wsMenuText);
-	AppendMenuW(hSpellMenu, MF_STRING, 9993, L"Ignore and Continue");
 	// Now we list the suggestions
 	wchar_t wcSugItem[256] = { 0 };
 
@@ -764,12 +629,17 @@ bool SpellCheckAndSuggest(wchar_t* wcRawWord)
 	POINT pt;
 	pt.x = rctMain.left = rctMain.left + ((rctMain.right - rctMain.left) / 2);
 	pt.y = rctMain.top;
-	//GetCursorPos(&pt);
+	// place it in middle of main window
 	UINT uiSelect = TrackPopupMenu(hSpellMenu, TPM_NONOTIFY | TPM_RETURNCMD, pt.x, pt.y, 0, ghRichEdit, NULL);
 	// See what has been selected
-	if (uiSelect == 9991) // Add the word to dict and continue
+	if (uiSelect == 9991) // Add the word 
 	{
+		// Add the word to Hunspell dictionary in memory
 		pDllHunspellAdd(hSpell, szRawStr);
+
+		// Persist the added word into personal.dic as UTF-8
+		AppendToPersonalDic(wcRawWord);
+
 		SendMessageW(ghRichEdit, EM_SETSEL, (WPARAM)lngCurPos, (LPARAM)lngCurPos);
 	}
 	else if (uiSelect == 9992) // Look up the word on the Internet
@@ -791,7 +661,7 @@ bool SpellCheckAndSuggest(wchar_t* wcRawWord)
 
 		bool bRet = RichEdit_FindAndReplace(ghRichEdit, wcRawWord, wcSugItem);
 		if (!bRet)
-			msga("Error Replacing the word in Richedit!");
+				msga("Error Replacing the word in Richedit!");
 	}
 	else
 	{
@@ -830,31 +700,7 @@ LRESULT CALLBACK EditLoadSubClassProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
 	{
 		case WM_CHAR:
 		{
-			// If user typed space and spell check enabled, run existing behavior
-			if (wParam == 32 && gbDoSpell) {
-			/*	CheckSpelling();
-			}
-			else
-			{ */
-				// For most printable characters and backspace we can retrieve the current word
-				// Note: WM_CHAR sends the character code (already translated)
-				if (iswprint((wchar_t)wParam) || wParam == '\b')
-				{
-					/* std::wstring currentWord;
-					if (GetWordAtCaret(ghRichEdit, currentWord))
-					{
-						// Example action: debug output for the current word.
-						// Replace with your desired processing (UI update, suggestions, etc.)
-						OutputDebugStringW(L"[Word] ");
-						OutputDebugStringW(currentWord.c_str());
-						OutputDebugStringA("\n");
-						SpellCheckAndSuggest((wchar_t*)currentWord.c_str());
-
-						// If you want to surface it in the UI you can, e.g.:
-						// SendMessageW(ghList, LB_ADDSTRING, 0, (LPARAM)currentWord.c_str());
-					}*/
-				}
-			}
+			// you can add custom handling for character input here if needed
 		}
 		break;
 		case WM_KEYDOWN:
@@ -1517,4 +1363,93 @@ wstring ConvertToBold(const wstring& inString) {
 
 	return result;
 }
+
+// Personal Dictionary Management	
+// Get the directory of the running executable
+std::wstring GetExeDirectory()
+{
+	wchar_t path[MAX_PATH] = { 0 };
+	GetModuleFileNameW(nullptr, path, MAX_PATH);
+	PathRemoveFileSpecW(path);
+	return std::wstring(path);
+}
+
+// Get the full path to personal.dic	
+std::wstring GetPersonalDicPath()
+{
+	return GetExeDirectory() + L"\\personal.dic";
+}
+
+// Load personal.dic into a vector of UTF-8 strings
+std::vector<std::string> LoadPersonalDictionary(const std::wstring& file)
+{
+	std::vector<std::string> words;
+	std::string narrow(file.begin(), file.end());
+	std::ifstream ifs(narrow, std::ios::in | std::ios::binary);
+	if (!ifs.is_open()) return words;
+
+	std::string line;
+	while (std::getline(ifs, line))
+	{
+		if (!line.empty())
+		{
+			// Trim CR if present
+			if (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
+				line.erase(std::remove_if(line.begin(), line.end(), [](char c) { return c == '\r' || c == '\n'; }), line.end());
+
+			if (!line.empty()) words.push_back(line);
+		}
+	}
+
+	return words;
+}
+
+// Append a word to personal.dic if not already present (case-insensitive)	
+void AppendToPersonalDic(const std::wstring& word)
+{
+	std::wstring personal = GetPersonalDicPath();
+	//EnsureFileExists(personal);
+
+	// Load existing words to avoid duplicates (case-insensitive ASCII compare)
+	auto vecExisting = LoadPersonalDictionary(personal);
+	std::string u8Word = WideToUtf8(word);
+
+	for (auto& s : vecExisting)
+	{
+		// simple case-sensitive compare	
+		std::string lower_s = s;
+		std::string lower_w = u8Word;
+		if (lower_s == lower_w) return; // already exists
+	}
+
+	// Append the word in UTF-8, one per line
+	std::string narrow(personal.begin(), personal.end());
+	std::ofstream ofs(narrow, std::ios::out | std::ios::app | std::ios::binary);
+	if (!ofs.is_open()) return;
+	ofs << u8Word << "\n";
+	ofs.close();
+}
+
+// Helper: Convert between wide string and UTF-8
+std::string WideToUtf8(const std::wstring& w)
+{
+	if (w.empty()) return std::string();
+	int required = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+	if (required <= 0) return std::string();
+	std::string out(required, 0);
+	WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), &out[0], required, nullptr, nullptr);
+	return out;
+}
+
+// Helper: Convert from UTF-8 to wide string
+std::wstring Utf8ToWide(const std::string& s)
+{
+	if (s.empty()) return std::wstring();
+	int required = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
+	if (required <= 0) return std::wstring();
+	std::wstring out(required, 0);
+	MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &out[0], required);
+	return out;
+}
+
 
