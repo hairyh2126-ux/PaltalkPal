@@ -93,6 +93,7 @@ HRESULT __stdcall GetUIAutomationElementFromHWNDAndClassName(HWND hwnd, const wc
 HRESULT __stdcall FindWindowByTitle(const std::wstring& title, IUIAutomationElement** outElement);
 
 // Send Text to Paltalk Out window
+void RestoreAndBringToFront(HWND hWnd);
 BOOL SendListItemTextToPaltalk(void);
 BOOL AddTextToList(wchar_t* wcText, int iLL);
 void CreateContextMenu(WPARAM wParam, LPARAM lparam);
@@ -113,10 +114,12 @@ std::vector<std::string> LoadPersonalDictionary(const std::wstring& file);
 std::string WideToUtf8(const std::wstring& w);
 std::wstring Utf8ToWide(const std::string& s);
 
-
+// Subclass procedure for Rich Edit Control
 LRESULT CALLBACK EditLoadSubClassProc(HWND hWnd, UINT msg, WPARAM wParam,
 	LPARAM lParam, UINT_PTR uIdSubClass,
 	DWORD_PTR dwRefData);
+
+// End of Function prototypes
 
 // Application Entry 
 int APIENTRY WinMain(_In_ HINSTANCE hInstance,_In_opt_ HINSTANCE hPrevInstance,_In_ LPSTR lpCmdLine,_In_ int nShowCmd)
@@ -187,8 +190,9 @@ BOOL CALLBACK DlgMain(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		ghRichEdit = GetDlgItem(hwndDlg, IDC_RICHEDIT2_INPUT);
 		ghList = GetDlgItem(hwndDlg, IDC_LIST_HISTORY);
 		ghListNicks = GetDlgItem(hwndDlg, IDC_LIST_NICKS);
-
-		SetWindowSubclass(ghRichEdit, EditLoadSubClassProc, 0, 0);
+		// Setting up subclass rich edit control
+		SetWindowSubclass(ghRichEdit, EditLoadSubClassProc, 1, 0);
+		
 		if (!InitRichEdit()) msga("InitRichEdit failed!");
 		if (!InitHunspell())
 		{
@@ -204,6 +208,7 @@ BOOL CALLBACK DlgMain(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		// Setting up event mask for rich edit control
 		SendMessage(ghRichEdit, EM_SETEVENTMASK, 0,
 			ENM_UPDATE | ENM_CHANGE | ENM_KEYEVENTS);
+		
 
 	}
 	break; // return TRUE; 
@@ -265,7 +270,7 @@ BOOL CALLBACK DlgMain(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		{
 				if (!OnSendButtonClick())
 				{
-					msga("Error OnSendButtonClick() BTADDLIST FAIL!");
+				 msga("Error Nothig to Send to Paltalk!");
 				}						
 		}
 		return TRUE;
@@ -337,14 +342,14 @@ BOOL CALLBACK DlgMain(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		{
 			if (HIWORD(wParam) == LBN_DBLCLK)
 				if (!SendListItemTextToPaltalk())
-					msga("Error SendListItemTextToPaltalk() Fail!");
+					msga("Error SendListItemTextToPaltalk()!");
 		}
 		return TRUE;
 		case IDC_LIST_NICKS:
 		{
 			if (HIWORD(wParam) == LBN_DBLCLK)
 				if (!SendNick2Richedit())
-					msga("Error Send Nick to Richedit Fail!");
+				 msga("Error Send Nick to Richedit!");
 		}
 		return TRUE;
 
@@ -721,6 +726,8 @@ LRESULT CALLBACK EditLoadSubClassProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
 	return DefSubclassProc(hWnd, msg, wParam, lParam);
 }
 
+
+
 /// Add text to scan list box
 static void ScanAddToList(HWND hwList, wchar_t* wcText)
 {
@@ -786,8 +793,7 @@ BOOL OnSendButtonClick(void)
 	}
 	else
 	{
-		//if(pwcText) pwcText[iNC] = '\0';
-
+		
 		if (gbPushPt)
 		{
 			//new function comes here 
@@ -1049,7 +1055,8 @@ void SendMessageToPaltalk(wchar_t* szMsg)
 		else {
 			bstrOut = SysAllocString(wcOut.c_str());
 		}
-		//emojiTextEditElement->SetFocus();
+		
+		emojiTextEditElement->SetFocus();
 		// Send the text 
 		pattern->SetValue(bstrOut);
 		SendMessageA(ghPtMain, WM_KEYDOWN, (WPARAM)VK_RETURN, 0);
@@ -1059,9 +1066,9 @@ void SendMessageToPaltalk(wchar_t* szMsg)
 	else {
 		OutputDebugStringA("GetCurrentPatternAs failed: ");
 	}
-	SetFocus(ghRichEdit);
-	Sleep(500);
 
+	// Get the RichEdit window to the front
+	RestoreAndBringToFront(ghRichEdit);
 }
 
 BOOL GetNicknames(void)
@@ -1169,7 +1176,6 @@ BOOL SendNick2Richedit(void)
 		if (lLen != 0)
 		{
 			wsprintfW(wcMsg, L"%s ", pwcItemText);
-			//int iSel = lstrlenW(wcMsg) + 2;
 			SendMessageW(ghRichEdit, EM_REPLACESEL, (WPARAM)TRUE, (LPARAM)wcMsg);
 			SetFocus(ghRichEdit);
 			bRet = TRUE;
@@ -1451,5 +1457,37 @@ std::wstring Utf8ToWide(const std::string& s)
 	MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &out[0], required);
 	return out;
 }
+
+// Restore the window and bring it to the front
+void RestoreAndBringToFront(HWND hWnd)
+{
+	if (!IsWindow(hWnd))
+		return;
+
+	// Restore if minimized
+	if (IsIconic(hWnd))
+		ShowWindow(hWnd, SW_RESTORE);
+
+	// Get current foreground window
+	HWND hForeground = GetForegroundWindow();
+	if (hForeground == hWnd)
+		return; // already in front
+
+	// Get thread IDs
+	DWORD dwFgThread = GetWindowThreadProcessId(hForeground, NULL);
+	DWORD dwOurThread = GetCurrentThreadId();
+
+	// Temporarily attach input
+	AttachThreadInput(dwOurThread, dwFgThread, TRUE);
+
+	// Bring to front
+	SetForegroundWindow(hWnd);
+	BringWindowToTop(hWnd);
+	SetFocus(hWnd);
+
+	// Detach input
+	AttachThreadInput(dwOurThread, dwFgThread, FALSE);
+}
+
 
 
