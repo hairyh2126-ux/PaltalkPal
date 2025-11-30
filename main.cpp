@@ -348,12 +348,17 @@ BOOL CALLBACK DlgMain(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		case IDC_LIST_NICKS:
 		{
 			if (HIWORD(wParam) == LBN_DBLCLK)
+			{
 				if (!SendNick2Richedit())
+				{ 
 				 msga("Error Send Nick to Richedit!");
+				 break;
+				}
+				return TRUE;
+			}
+			
 		}
-		return TRUE;
-
-
+		break;
 		case IDM_LOADFILE:
 		{
 			if (!LoadFileToList(ghList))
@@ -483,9 +488,9 @@ void CreateContextMenu(WPARAM wParam, LPARAM lparam)
 	{
 		HMENU hMenu = CreatePopupMenu();
 		if (gbPushPt)
-			InsertMenuW(hMenu, 1, MF_BYCOMMAND | MF_STRING | MF_ENABLED, IDM_PUSH, L"Disable Play to PT");
+			InsertMenuW(hMenu, 1, MF_BYCOMMAND | MF_STRING | MF_ENABLED | MF_CHECKED, IDM_PUSH, L"Send to Paltalk");
 		else
-			InsertMenuW(hMenu, 1, MF_BYCOMMAND | MF_STRING | MF_ENABLED, IDM_PUSH, L"Enable Play to PT");
+			InsertMenuW(hMenu, 1, MF_BYCOMMAND | MF_STRING | MF_ENABLED | MF_UNCHECKED, IDM_PUSH, L"Send to Paltalk");
 			InsertMenuW(hMenu, 2, MF_BYCOMMAND | MF_STRING | MF_ENABLED, IDM_PASTE, L"Paste to Text Box");
 			InsertMenuW(hMenu, 3, MF_BYCOMMAND | MF_STRING | MF_ENABLED, IDM_COPY, L"Copy Selected Text");
 			InsertMenuW(hMenu, 4, MF_BYCOMMAND | MF_STRING | MF_ENABLED, IDM_LOOK, L"Web Lookup Selected");
@@ -610,11 +615,12 @@ bool SpellCheckAndSuggest(wchar_t* wcRawWord)
 	wchar_t wsMenuText[256] = { 0 };
 	// Create the menu for suggestions
 	hSpellMenu = CreatePopupMenu();
-	AppendMenuW(hSpellMenu, MF_STRING, 9993, L"Ignore and Continue");
+	AppendMenuW(hSpellMenu, MF_STRING, 9993, L"Ignore");
 	swprintf_s(wsMenuText, 255, L"Add: %s", wcRawWord);
 	AppendMenuW(hSpellMenu, MF_STRING, 9991, wsMenuText);
 	swprintf_s(wsMenuText, 255, L"Look Up: %s", wcRawWord);
 	AppendMenuW(hSpellMenu, MF_STRING, 9992, wsMenuText);
+	AppendMenuW(hSpellMenu, MF_SEPARATOR, 0, NULL);
 	// Now we list the suggestions
 	wchar_t wcSugItem[256] = { 0 };
 
@@ -1044,10 +1050,6 @@ void SendMessageToPaltalk(wchar_t* szMsg)
 	//GetCurrentPatternAs(UIA_ValuePatternId, IID_PPV_ARGS(&pattern));
 	if (SUCCEEDED(hr)) {
 		BSTR bstrOut = NULL;
-
-		/*int iLen = MultiByteToWideChar(CP_ACP, 0, szMsg, -1, NULL, 0);
-		wcOut.resize(iLen - 1);
-		MultiByteToWideChar(CP_ACP, 0, szMsg, -1, &wcOut[0], iLen); */
 		if (gbSendBold) {
 			wstring wstrOutBold = ConvertToBold(wcOut);
 			bstrOut = SysAllocString(wstrOutBold.c_str());
