@@ -152,9 +152,11 @@
     <Image Include="TextInputSpell.ico" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="CDotUser.cpp" />
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="CDotUser.h" />
     <ClInclude Include="SpellcheckUtilities.h" />
     <ClInclude Include="main.h" />
     <ClInclude Include="resource.h" />
