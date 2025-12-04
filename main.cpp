@@ -423,7 +423,7 @@ BOOL InitPaltalkWindows(void)
 		gRoomTitle = std::wstring(szTitle, szTitle + strlen(szTitle));
 	}
 
-	ghPtMain = FindWindowA("Qt5150QWindowIcon",szTitle);
+	ghPtMain = FindWindowA("Qt6100QWindowOwnDCIcon",szTitle);
 
 	if (!ghPtMain) return FALSE;
 
@@ -1146,7 +1146,7 @@ BOOL GetNicknames(void)
 		// Write the LVITEM structure to the space in the remote process
 		// (without the buffer, its contents are undefined anyway)
 		if (!WriteProcessMemory(hProc, pRemoteData, &ixData, sizeof(ixData.hdi), &lpNumBytesWritten)) break;
-		wsprintfA(szOut, "Num bytes written to pM: %d \n", lpNumBytesWritten);
+		wsprintfA(szOut, "Num bytes written to pM: %d \n", (int)lpNumBytesWritten);
 		OutputDebugStringA(szOut);
 		
 		// Send the get item message  LVM_GETITEMTEXTA 4141 is to read nick as char[], 4171 to get the image number
@@ -1155,7 +1155,7 @@ BOOL GetNicknames(void)
 		SIZE_T lpNumBytesRead = 0;
 		// Read the data back to this process memory
 		if (!ReadProcessMemory(hProc, pRemoteData, &ixData, sizeof(ixData), &lpNumBytesRead)) break;
-		wsprintfA(szOut, "Num bytes read to ixData : %d \n", lpNumBytesRead);
+		wsprintfA(szOut, "Num bytes read to ixData : %d \n", (int)lpNumBytesRead);
 		OutputDebugStringA(szOut);
 
 		//Documentation says that pszText can be changed by the remote process
@@ -1164,7 +1164,7 @@ BOOL GetNicknames(void)
 			lpNumBytesRead = 0;
 			ReadProcessMemory(hProc, ixData.hdi.pszText, &ixData.buffer, ixData.hdi.cchTextMax * sizeof(wchar_t), &lpNumBytesRead);
 		}
-		wsprintfA(szOut, "Num bytes read to ixData.buffer : %d \n", lpNumBytesRead);
+		wsprintfA(szOut, "Num bytes read to ixData.buffer : %d \n", (int)lpNumBytesRead);
 		OutputDebugStringA(szOut);
 
 		wsprintfA(szNickname, "%s",ixData.buffer);
