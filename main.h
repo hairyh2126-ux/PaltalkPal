@@ -35,6 +35,7 @@
 #include <iterator> // This include for char std::begin and std::end
 #include <cwctype> //  This include for wchar std::iswlower and std::iswupper
 #include "SpellcheckUtilities.h"
+#include "CDotUser.h" 
 
 // Resource Header
 #include "resource2.h"

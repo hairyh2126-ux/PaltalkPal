@@ -1,9 +1,20 @@
 /*********************************/
 /* (c) 2024 Hairy Soft Solutions */
 /*********************************/
+#pragma once
 #include "main.h"
 #include <algorithm>
 using namespace std;
+
+// Macro to extract X coordinate from LPARAM
+#ifndef GET_X_LPARAM
+#define GET_X_LPARAM(lp) ((int)(short)LOWORD(lp))
+#endif
+
+// Macro to extract Y coordinate from LPARAM
+#ifndef GET_Y_LPARAM
+#define GET_Y_LPARAM(lp) ((int)(short)HIWORD(lp))
+#endif
 
 // Global Variables
 HINSTANCE	hInst = 0;
@@ -59,6 +70,7 @@ char szAffGB[] = "en_GB.aff";
 char szDicGB[] = "en_GB.dic";
 char szAff[MAX_PATH] = { 0 };
 char szDic[MAX_PATH] = { 0 };
+std::wstring gRoomTitle = L"";
 
 // Global for Hungspell 
 BOOL gbDoSpell = TRUE;
@@ -115,9 +127,19 @@ std::string WideToUtf8(const std::wstring& w);
 std::wstring Utf8ToWide(const std::string& s);
 
 // Subclass procedure for Rich Edit Control
-LRESULT CALLBACK EditLoadSubClassProc(HWND hWnd, UINT msg, WPARAM wParam,
+LRESULT CALLBACK EditLoadSubClassProc(
+	HWND hWnd, UINT msg, WPARAM wParam,
 	LPARAM lParam, UINT_PTR uIdSubClass,
 	DWORD_PTR dwRefData);
+// Subclass procedure for List Box Control
+LRESULT CALLBACK ListBoxSubclassProc(
+	HWND hList,
+	UINT msg,
+	WPARAM wParam,
+	LPARAM lParam,
+	UINT_PTR uIdSubclass,
+	DWORD_PTR dwRefData);
+
 
 // End of Function prototypes
 
@@ -192,6 +214,8 @@ BOOL CALLBACK DlgMain(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		ghListNicks = GetDlgItem(hwndDlg, IDC_LIST_NICKS);
 		// Setting up subclass rich edit control
 		SetWindowSubclass(ghRichEdit, EditLoadSubClassProc, 1, 0);
+		// Setting up subclass list box control
+		SetWindowSubclass(ghListNicks, ListBoxSubclassProc, 1, 0);
 		
 		if (!InitRichEdit()) msga("InitRichEdit failed!");
 		if (!InitHunspell())
@@ -396,9 +420,10 @@ BOOL InitPaltalkWindows(void)
 	{
 		wsprintfA(szTemp, "Paltalk Room - %s", szTitle);
 		SetWindowTextA(ghMain, szTemp);
+		gRoomTitle = std::wstring(szTitle, szTitle + strlen(szTitle));
 	}
 
-	ghPtMain = FindWindowA("Qt5150QWindowIcon",szTitle);
+	ghPtMain = FindWindowA("Qt6100QWindowOwnDCIcon",szTitle);
 
 	if (!ghPtMain) return FALSE;
 
@@ -731,8 +756,6 @@ LRESULT CALLBACK EditLoadSubClassProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
 
 	return DefSubclassProc(hWnd, msg, wParam, lParam);
 }
-
-
 
 /// Add text to scan list box
 static void ScanAddToList(HWND hwList, wchar_t* wcText)
@@ -1123,7 +1146,7 @@ BOOL GetNicknames(void)
 		// Write the LVITEM structure to the space in the remote process
 		// (without the buffer, its contents are undefined anyway)
 		if (!WriteProcessMemory(hProc, pRemoteData, &ixData, sizeof(ixData.hdi), &lpNumBytesWritten)) break;
-		wsprintfA(szOut, "Num bytes written to pM: %d \n", lpNumBytesWritten);
+		wsprintfA(szOut, "Num bytes written to pM: %d \n", (int)lpNumBytesWritten);
 		OutputDebugStringA(szOut);
 		
 		// Send the get item message  LVM_GETITEMTEXTA 4141 is to read nick as char[], 4171 to get the image number
@@ -1132,7 +1155,7 @@ BOOL GetNicknames(void)
 		SIZE_T lpNumBytesRead = 0;
 		// Read the data back to this process memory
 		if (!ReadProcessMemory(hProc, pRemoteData, &ixData, sizeof(ixData), &lpNumBytesRead)) break;
-		wsprintfA(szOut, "Num bytes read to ixData : %d \n", lpNumBytesRead);
+		wsprintfA(szOut, "Num bytes read to ixData : %d \n", (int)lpNumBytesRead);
 		OutputDebugStringA(szOut);
 
 		//Documentation says that pszText can be changed by the remote process
@@ -1141,7 +1164,7 @@ BOOL GetNicknames(void)
 			lpNumBytesRead = 0;
 			ReadProcessMemory(hProc, ixData.hdi.pszText, &ixData.buffer, ixData.hdi.cchTextMax * sizeof(wchar_t), &lpNumBytesRead);
 		}
-		wsprintfA(szOut, "Num bytes read to ixData.buffer : %d \n", lpNumBytesRead);
+		wsprintfA(szOut, "Num bytes read to ixData.buffer : %d \n", (int)lpNumBytesRead);
 		OutputDebugStringA(szOut);
 
 		wsprintfA(szNickname, "%s",ixData.buffer);
@@ -1196,6 +1219,7 @@ HRESULT __stdcall InitUIAutomation(void)
 	HRESULT hr = CoCreateInstance(__uuidof(CUIAutomation), NULL,
 		CLSCTX_INPROC_SERVER,
 		IID_PPV_ARGS(&g_pUIAutomation));
+
 	if (FAILED(hr)) {
 		char szMsg[128];
 		sprintf_s(szMsg, sizeof(szMsg), "[UIAutomation] CoCreateInstance FAILED! HRESULT=0x%08X\n", hr);
@@ -1204,6 +1228,7 @@ HRESULT __stdcall InitUIAutomation(void)
 	}
 
 	OutputDebugStringA("[UIAutomation] CUIAutomation instance created successfully.\n");
+
 	return S_OK;
 }
 
@@ -1491,5 +1516,57 @@ void RestoreAndBringToFront(HWND hWnd)
 	AttachThreadInput(dwOurThread, dwFgThread, FALSE);
 }
 
+/****************************************************************************************************************/
+/// Red dot related functions start here
+
+LRESULT CALLBACK ListBoxSubclassProc(
+	HWND hList,
+	UINT msg,
+	WPARAM wParam,
+	LPARAM lParam,
+	UINT_PTR uIdSubclass,
+	DWORD_PTR dwRefData)
+{
+	switch (msg)
+	{
+	case WM_LBUTTONDOWN:
+	{
+		// Check if CTRL is held
+		if (GetKeyState(VK_CONTROL) & 0x8000)
+		{
+			// Get mouse click coordinates
+			int x = GET_X_LPARAM(lParam);
+			int y = GET_Y_LPARAM(lParam);
+
+			// Convert Y to item index
+			int index = SendMessage(hList, LB_ITEMFROMPOINT, 0, MAKELPARAM(x, y));
+
+			if (index != LB_ERR)
+			{
+				std::string nickname;
+				int lLen = SendMessageA(hList, LB_GETTEXTLEN, (WPARAM)index, 0);
+				if (lLen > 0)
+				{
+					nickname.resize(lLen);
+					SendMessageA(hList, LB_GETTEXT, (WPARAM)index, (LPARAM)&nickname[0]);
+					//msga( nickname.c_str());
+					// Now dot the nickname to Paltalk
+					CDotUser dotUser(g_pUIAutomation, ghPtMain, gRoomTitle);
+					dotUser.DotAndUnDotMicUser(nickname.c_str());
+				}
+				return 0; // Handled
+			}
+
+		}
+		break;
+	}
+
+	case WM_NCDESTROY:
+		RemoveWindowSubclass(hList, ListBoxSubclassProc, uIdSubclass);
+		break;
+	}
+
+	return DefSubclassProc(hList, msg, wParam, lParam);
+}
 
 
