@@ -23,6 +23,9 @@ HWND		ghEdit = 0;
 HWND		ghList = 0;
 HWND		ghRichEdit = 0;
 HWND		ghListNicks = 0;
+HWND 	    ghGetPt = 0;
+HWND  	    ghGetPtGlg = 0;
+HWND		ghListRooms = 0;
 
 // Paltalk Windows Handles
 HWND ghPtMain = NULL;
@@ -64,10 +67,10 @@ typHunSpFreeList pDllHunspellFreeList;
 typHunSpAdd pDllHunspellAdd;
 
 Hunhandle* hSpell = NULL;
-char szAffUS[] = "en_US.aff";
-char szDicUS[] = "en_US.dic";
-char szAffGB[] = "en_GB.aff";
-char szDicGB[] = "en_GB.dic";
+char szAffUS[] = ".\\en_US.aff";
+char szDicUS[] = ".\\en_US.dic";
+char szAffGB[] = ".\\en_GB.aff";
+char szDicGB[] = ".\\en_GB.dic";
 char szAff[MAX_PATH] = { 0 };
 char szDic[MAX_PATH] = { 0 };
 std::wstring gRoomTitle = L"";
@@ -81,12 +84,12 @@ BOOL gbClipActive = FALSE;
 BOOL gbClip2Richedit = FALSE;
 // global for Send Text to Paltalk
 BOOL gbSendBold = FALSE;
+BOOL gbPMode = FALSE;
 // Font handles
 HFONT ghFntRichEdit = NULL;
 
 // Function prototypes
-BOOL CALLBACK DlgMain(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
-BOOL InitPaltalkWindows(void);
+//BOOL InitPaltalkWindows(void);
 BOOL CALLBACK EnumPaltalkWindows(HWND hWnd, LPARAM lParam);
 BOOL InitRichEdit(void);
 BOOL OnSendButtonClick(void);
@@ -103,6 +106,7 @@ HRESULT __stdcall InitUIAutomation(void);
 HRESULT __stdcall UninitUIAutomation(void);
 HRESULT __stdcall GetUIAutomationElementFromHWNDAndClassName(HWND hwnd, const wchar_t* className, IUIAutomationElement** foundElement);
 HRESULT __stdcall FindWindowByTitle(const std::wstring& title, IUIAutomationElement** outElement);
+HRESULT __stdcall GetUIAutomationElementFromHWNDAndAutomationId(HWND hwnd, const wchar_t* automationId, IUIAutomationElement** foundElement);
 
 // Send Text to Paltalk Out window
 void RestoreAndBringToFront(HWND hWnd);
@@ -139,8 +143,12 @@ LRESULT CALLBACK ListBoxSubclassProc(
 	LPARAM lParam,
 	UINT_PTR uIdSubclass,
 	DWORD_PTR dwRefData);
-
-
+BOOL CALLBACK PaltalkDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
+// Get Paltalk rooms windows handles
+bool GetPaltalkRoomWindowsHandles(void);
+BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam);
+bool SelectPaltalkRoomWindow(wchar_t* wcRoomName);
+BOOL CALLBACK DlgMain(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
 // End of Function prototypes
 
 // Application Entry 
@@ -196,7 +204,7 @@ int APIENTRY WinMain(_In_ HINSTANCE hInstance,_In_opt_ HINSTANCE hPrevInstance,_
 		OutputDebugStringA("[COM] COM initialized successfully (STA mode).\n");
 	}
 	
-	return DialogBox(hInst, MAKEINTRESOURCE(IDD_MAIN), NULL, (DLGPROC)DlgMain);
+	return (int) DialogBox(hInst, MAKEINTRESOURCE(IDD_MAIN), NULL, (DLGPROC)DlgMain);
 }
 
 //
@@ -212,6 +220,7 @@ BOOL CALLBACK DlgMain(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		ghRichEdit = GetDlgItem(hwndDlg, IDC_RICHEDIT2_INPUT);
 		ghList = GetDlgItem(hwndDlg, IDC_LIST_HISTORY);
 		ghListNicks = GetDlgItem(hwndDlg, IDC_LIST_NICKS);
+		ghGetPt = GetDlgItem(hwndDlg, IDC_GETPT);
 		// Setting up subclass rich edit control
 		SetWindowSubclass(ghRichEdit, EditLoadSubClassProc, 1, 0);
 		// Setting up subclass list box control
@@ -286,6 +295,7 @@ BOOL CALLBACK DlgMain(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		return TRUE;
 		case IDC_BUTTON_NICKS:
 		{
+			if (gbPMode) return TRUE; // No Nicknames in PM mode
 			if(!GetNicknames())
 				msga("No Paltalk Room, Get Paltalk and try again");
 		}
@@ -300,8 +310,10 @@ BOOL CALLBACK DlgMain(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		return TRUE;
 		case IDC_GETPT:
 		{
-			if (!InitPaltalkWindows())
-			 msga("Paltalk Windows Capture Fails!");
+			/*if (!InitPaltalkWindows())
+			 msga("Paltalk Windows Capture Fails!");*/
+			if(!DialogBox(hInst, MAKEINTRESOURCE(IDD_GETPALTALK), ghMain, (DLGPROC)PaltalkDlgProc))
+				msga("Get Paltalk Dialog Fail");
 		}
 		return TRUE;
 		case IDM_SAVELIST:
@@ -331,6 +343,12 @@ BOOL CALLBACK DlgMain(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		{
 			if (gbPushPt) gbPushPt = false;
 			else gbPushPt = true;
+		}
+		return TRUE;
+		case IDM_PMODE:
+		{
+			if (gbPMode) gbPMode = false;
+			else gbPMode = true;
 		}
 		return TRUE;
 		case IDM_PASTE:
@@ -401,31 +419,192 @@ BOOL CALLBACK DlgMain(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	return FALSE;
 }
 
+// Get Paltalk dialog callback
+BOOL CALLBACK PaltalkDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+	switch (uMsg)
+	{
+	case WM_INITDIALOG:
+		ghGetPtGlg = hwndDlg;
+		ghListRooms = GetDlgItem(hwndDlg, IDC_LISTPTROOMS);
+		return TRUE;
+	case WM_COMMAND:
+		switch (LOWORD(wParam))
+		{
+			case IDC_BTGETROOM:
+			{
+				gbPMode = FALSE;
+				if (!GetPaltalkRoomWindowsHandles())
+					msga("Paltalk Windows Capture Fails!");
+			}
+			return TRUE;
+			case IDC_BTGETPMS:
+			{
+				gbPMode = TRUE;
+				if (!GetPaltalkRoomWindowsHandles())
+					msga("Paltalk PM Windows Capture Fails!");	
+			}
+			return TRUE;
+			case IDOK:
+			{
+				LRESULT lrIndx = SendMessageW(ghListRooms, LB_GETCURSEL, 0, 0);
+				if (lrIndx == LB_ERR)
+				{
+					msga("No Paltalk Room Selected!");
+					break;
+				}
+				wchar_t wcRoomName[512] = { 0 };
+				SendMessageW(ghListRooms, LB_GETTEXT, (WPARAM)lrIndx, (LPARAM)wcRoomName);
+				ghPtMain = (HWND)SendMessageW(ghListRooms, LB_GETITEMDATA, (WPARAM)lrIndx, 0);
+				if (!SelectPaltalkRoomWindow(wcRoomName))
+					msga("Error Selecting Paltalk Room Window!");
+				else
+					EndDialog(hwndDlg, 0);
+			}
+			case IDCANCEL:
+				EndDialog(hwndDlg, 1);
+			return TRUE;
+		}
+		break;
+	default:
+		return FALSE;
+	}
+	return FALSE;
+}
+
+bool GetPaltalkRoomWindowsHandles(void)
+{
+	wchar_t wcRoomClass[] = L"Qt6100QWindowOwnDCIcon";
+	wchar_t wcPmClass[] = L"Qt6100QWindowIcon";
+	bool ret = false;
+	// Clear previous list
+	SendDlgItemMessageW(ghGetPtGlg, IDC_LISTPTROOMS, LB_RESETCONTENT, 0, 0);
+
+	// Enumerate all the room windows
+	if(!gbPMode)
+		ret = EnumWindows(EnumWindowsProc, (LPARAM)wcRoomClass);
+	else 
+		ret = EnumWindows(EnumWindowsProc, (LPARAM)wcPmClass);
+	return ret;
+}
+
+BOOL EnumWindowsProc(HWND hwnd, LPARAM lParam)
+{
+	wchar_t className[256];
+	if (GetClassNameW(hwnd, className, 256) == 0)
+		return TRUE;
+
+	if (wcscmp(className, (wchar_t*) lParam) == 0)
+	{
+		wchar_t title[512];
+		GetWindowTextW(hwnd, title, 512);
+		if (wcscmp(title, L"Paltalk NG") == 0)
+			return TRUE;
+		if (wcscmp(title, L"Paltalk") == 0)
+			return TRUE;
+
+		LRESULT iIndex = SendMessageW((HWND)ghListRooms, LB_ADDSTRING, 0, (LPARAM)title);
+		SendMessageW(ghListRooms, LB_SETITEMDATA, (WPARAM)iIndex, (LPARAM)hwnd);
+		return TRUE; 
+	}
+	return TRUE;
+}
+
+bool SelectPaltalkRoomWindow(wchar_t* wcRoomName)
+{
+	
+	if (!ghPtMain || !wcRoomName)	
+		return false;
+	
+		
+	WCHAR wcTemp[512] = { 0 };
+	wsprintfW(wcTemp, L"Paltalk Room - %s", wcRoomName);
+	SetWindowTextW(ghMain, wcTemp);
+
+	// Cleaning up previous UIAutomation elements
+	UninitUIAutomation();
+
+	// Initialise UIAutomation
+	if (FAILED(InitUIAutomation())) {
+		msga("Initializing UI Automation failed!");
+		return FALSE;
+	}
+	
+	SetWindowPos(ghPtMain, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+
+	// Getting the Emoji Text Edit control UIAutomation element to send text to Paltalk PM
+	if(gbPMode)
+	{ 
+		
+		emojiTextEditElement.Release();
+		const wchar_t* pmAutomationId =
+			L"QApplication.qtctrl::DefaultWindowContainer.IM_WIDGET.qtctrl::AnimatedStackedWidget.QWidget.ui::im::ImEditMessageWidget.ui::controls::EmojiTextEdit";
+		HRESULT hr = GetUIAutomationElementFromHWNDAndAutomationId(ghPtMain, pmAutomationId, &emojiTextEditElement);
+		if (FAILED(hr) || !emojiTextEditElement) {
+			OutputDebugStringA("GetUIAutomationElementFromHWNDAndAutomationId failed - aborting \n");
+			return false;
+		}
+		OutputDebugStringA("GetUIAutomationElementFromHWNDAndAutomationId for PM succeeded\n");
+		return true;
+	}
+
+	// Getting the Emoji Text Edit control UIAutomation element for Room to send text to Paltalk
+	// Prefer finding the control by its AutomationId (full hierarchical id)
+	emojiTextEditElement.Release(); 
+	const wchar_t* emojiAutomationId =
+		L"QApplication.qtctrl::DefaultWindowContainer.ui::rooms::RoomWidget.QStackedWidget.QWidget.ui::widgets::CustomDoubleHSplitter.ui::widgets::CustomDoubleHSplitter.QWidget.ui::widgets::CustomDoubleVSplitter.QWidget.ui::rooms::ChatlogAreaWidget.ui::rooms::RoomEditMessageWidget.ui::controls::EmojiTextEdit";
+
+	HRESULT hr = GetUIAutomationElementFromHWNDAndAutomationId(ghPtMain, emojiAutomationId, &emojiTextEditElement);
+	if (FAILED(hr) || !emojiTextEditElement) {
+		OutputDebugStringA("GetUIAutomationElementFromHWNDAndAutomationId failed - falling back to class-name lookup\n");
+		// Fallback to class-name lookup (existing helper) if AutomationId search fails
+		hr = GetUIAutomationElementFromHWNDAndClassName(ghPtMain, L"ui::controls::EmojiTextEdit", &emojiTextEditElement);
+		if (FAILED(hr) || !emojiTextEditElement) {
+			OutputDebugStringA("Fallback GetUIAutomationElementFromHWNDAndClassName also failed\n");
+		}
+	}
+
+	// Finding the chat room window controls handles
+	if (!gbPMode)
+	{
+		ghPtRoom = FindWindowW(L"DlgGroupChat Window Class", wcRoomName);
+		EnumChildWindows(ghPtRoom, EnumPaltalkWindows, 0);
+	}
+	return true;
+}
+
+
 // Initialise the Paltalk Windows handles
-BOOL InitPaltalkWindows(void)
+/* BOOL InitPaltalkWindows(void)
 {
 	char szTitle[256] = { 0 };
 	char szTemp[512] = { 0 };
 	// Resetting handle
 	ghPtMain = 0;
 	ghPtRoom = 0;
-		
-	ghPtRoom = FindWindowA("DlgGroupChat Window Class", 0);
+	
+	ghPtMain = FindWindowA("Qt6100QWindowOwnDCIcon",0);
 
-	if (GetWindowTextA(ghPtRoom, szTitle, 254) < 1)
+	if (ghPtMain) 
 	{
-		return FALSE;
+		ghPtRoom = FindWindowA("DlgGroupChat Window Class", 0);
+
+		if (GetWindowTextA(ghPtRoom, szTitle, 254) < 1)
+		{
+			return FALSE;
+		}
+		else
+		{
+			wsprintfA(szTemp, "Paltalk Room - %s", szTitle);
+			SetWindowTextA(ghMain, szTemp);
+			gRoomTitle = std::wstring(szTitle, szTitle + strlen(szTitle));
+		}
+
 	}
 	else
 	{
-		wsprintfA(szTemp, "Paltalk Room - %s", szTitle);
-		SetWindowTextA(ghMain, szTemp);
-		gRoomTitle = std::wstring(szTitle, szTitle + strlen(szTitle));
+		return FALSE;
 	}
-
-	ghPtMain = FindWindowA("Qt6100QWindowOwnDCIcon",szTitle);
-
-	if (!ghPtMain) return FALSE;
 
 	// Cleaning up previous UIAutomation elements
 	UninitUIAutomation();
@@ -448,7 +627,7 @@ BOOL InitPaltalkWindows(void)
 	EnumChildWindows(ghPtRoom, EnumPaltalkWindows, 0);
 
 	return TRUE;
-}
+} */
 
 /// Enumeration Callback to Find the Control Windows
 BOOL CALLBACK EnumPaltalkWindows(HWND hWnd, LPARAM lParam)
@@ -472,7 +651,7 @@ BOOL CALLBACK EnumPaltalkWindows(HWND hWnd, LPARAM lParam)
 	return TRUE;
 }
 
-/// Initialise the Clock Display Window
+/// Initialise the Rchedit Control
 BOOL InitRichEdit(void)
 {
 	HDC hDC;
@@ -480,7 +659,7 @@ BOOL InitRichEdit(void)
 
 	hDC = GetDC(ghMain);
 	nHeight = -MulDiv(12, GetDeviceCaps(hDC, LOGPIXELSY), 72);
-	ghFntRichEdit = CreateFont(nHeight, 0, 0, 0, FW_REGULAR, 0, 0, 0, 0, 0, 0, 0, 0, TEXT("Microsoft Sans Serif"));
+	ghFntRichEdit = CreateFont(nHeight, 0, 0, 0, FW_BOLD, 0, 0, 0, 0, 0, 0, 0, 0, TEXT("Microsoft Sans Serif"));
 	SendMessageA(ghRichEdit, WM_SETFONT, (WPARAM)ghFntRichEdit, (LPARAM)TRUE);
 	SendMessageA(ghRichEdit, WM_SETTEXT, (WPARAM)0, (LPARAM)"");
 
@@ -544,7 +723,7 @@ static bool FileExistsA(const char* path)
 //Hungspell functions definitions
 BOOL InitHunspell(void)
 {
-	hinsDll = LoadLibraryA("libhunspell.dll");
+	hinsDll = LoadLibraryA(".\\libhunspell.dll");
 	if (!hinsDll) 
 	{
 		msga("Hungspell DLL not faund!");
@@ -604,6 +783,14 @@ bool SpellCheckAndSuggest(wchar_t* wcRawWord)
 	LONG lngCurPos = 0;
 	// Getting curser position
 	SendMessageW(ghRichEdit, EM_GETSEL, 0, (LPARAM)&lngCurPos);
+
+	// checking for empty string or single char
+	size_t stLen = wcslen(wcRawWord);
+	if (stLen < 2)
+	{
+		SendMessageW(ghRichEdit, EM_SETSEL, (WPARAM)lngCurPos, (LPARAM)lngCurPos);
+		return FALSE;
+	}
 
 	// Checking for URL, if we find, no need to spell it, exit with false
 	if (wcsncmp(wcRawWord, L"http://", 7) == 0 || wcsncmp(wcRawWord, L"www.", 4) == 0)
@@ -1569,4 +1756,37 @@ LRESULT CALLBACK ListBoxSubclassProc(
 	return DefSubclassProc(hList, msg, wParam, lParam);
 }
 
+// New helper: Get UIA element by AutomationId under the element for the given HWND
+HRESULT __stdcall GetUIAutomationElementFromHWNDAndAutomationId(HWND hwnd, const wchar_t* automationId, IUIAutomationElement** foundElement)
+{
+	if (!g_pUIAutomation || !hwnd || !automationId || !foundElement)
+		return E_POINTER;
 
+	*foundElement = nullptr;
+	HRESULT hr = S_OK;
+
+	CComPtr<IUIAutomationElement> elementRoot;
+	hr = g_pUIAutomation->ElementFromHandle(hwnd, &elementRoot);
+	if (FAILED(hr) || !elementRoot) {
+		OutputDebugStringA("[UIA] ElementFromHandle failed in GetUIAutomationElementFromHWNDAndAutomationId\n");
+		return hr;
+	}
+
+	// Create condition for AutomationId
+	CComPtr<IUIAutomationCondition> automationIdCondition;
+	CComVariant varAutomationId(automationId);
+	hr = g_pUIAutomation->CreatePropertyCondition(UIA_AutomationIdPropertyId, varAutomationId, &automationIdCondition);
+	if (FAILED(hr) || !automationIdCondition) {
+		OutputDebugStringA("[UIA] CreatePropertyCondition(UIA_AutomationIdPropertyId) failed\n");
+		return hr;
+	}
+
+	// Search subtree of the window for the element
+	hr = elementRoot->FindFirst(TreeScope_Subtree, automationIdCondition, foundElement);
+	if (FAILED(hr) || !*foundElement) {
+		OutputDebugStringA("[UIA] FindFirst(TreeScope_Subtree, AutomationId) failed or returned NULL\n");
+		return hr;
+	}
+
+	return S_OK;
+}

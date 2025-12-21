@@ -71,3 +71,4 @@ wchar_t wcAppName[] = L"Platalk Text Input";
 #define IDM_LOOK  5004
 #define IDM_SPELL 5005
 #define IDC_TOGGLE_SEND_BOLD 5006	
+#define IDM_PMODE 5007
