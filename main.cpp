@@ -241,8 +241,6 @@ BOOL CALLBACK DlgMain(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		// Setting up event mask for rich edit control
 		SendMessage(ghRichEdit, EM_SETEVENTMASK, 0,
 			ENM_UPDATE | ENM_CHANGE | ENM_KEYEVENTS);
-		
-
 	}
 	break; // return TRUE; 
 	case WM_CONTEXTMENU:
@@ -310,8 +308,7 @@ BOOL CALLBACK DlgMain(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		return TRUE;
 		case IDC_GETPT:
 		{
-			/*if (!InitPaltalkWindows())
-			 msga("Paltalk Windows Capture Fails!");*/
+			// Open Get Paltalk Dialog Box to select room or PM window
 			if(!DialogBox(hInst, MAKEINTRESOURCE(IDD_GETPALTALK), ghMain, (DLGPROC)PaltalkDlgProc))
 				msga("Get Paltalk Dialog Fail");
 		}
@@ -445,7 +442,7 @@ BOOL CALLBACK PaltalkDlgProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 					msga("Paltalk PM Windows Capture Fails!");	
 			}
 			return TRUE;
-			case IDOK:
+			case IDOK: // Select Room or PM Window
 			{
 				LRESULT lrIndx = SendMessageW(ghListRooms, LB_GETCURSEL, 0, 0);
 				if (lrIndx == LB_ERR)
@@ -510,16 +507,18 @@ BOOL EnumWindowsProc(HWND hwnd, LPARAM lParam)
 	return TRUE;
 }
 
+// Select the Paltalk Room Window and get its controls handles
 bool SelectPaltalkRoomWindow(wchar_t* wcRoomName)
 {
 	
 	if (!ghPtMain || !wcRoomName)	
 		return false;
-	
-		
+			
 	WCHAR wcTemp[512] = { 0 };
 	wsprintfW(wcTemp, L"Paltalk Room - %s", wcRoomName);
 	SetWindowTextW(ghMain, wcTemp);
+	// Setting global room title for dotting users
+	gRoomTitle = std::wstring(wcRoomName, wcRoomName + wcslen(wcRoomName));
 
 	// Cleaning up previous UIAutomation elements
 	UninitUIAutomation();
@@ -573,62 +572,6 @@ bool SelectPaltalkRoomWindow(wchar_t* wcRoomName)
 	return true;
 }
 
-
-// Initialise the Paltalk Windows handles
-/* BOOL InitPaltalkWindows(void)
-{
-	char szTitle[256] = { 0 };
-	char szTemp[512] = { 0 };
-	// Resetting handle
-	ghPtMain = 0;
-	ghPtRoom = 0;
-	
-	ghPtMain = FindWindowA("Qt6100QWindowOwnDCIcon",0);
-
-	if (ghPtMain) 
-	{
-		ghPtRoom = FindWindowA("DlgGroupChat Window Class", 0);
-
-		if (GetWindowTextA(ghPtRoom, szTitle, 254) < 1)
-		{
-			return FALSE;
-		}
-		else
-		{
-			wsprintfA(szTemp, "Paltalk Room - %s", szTitle);
-			SetWindowTextA(ghMain, szTemp);
-			gRoomTitle = std::wstring(szTitle, szTitle + strlen(szTitle));
-		}
-
-	}
-	else
-	{
-		return FALSE;
-	}
-
-	// Cleaning up previous UIAutomation elements
-	UninitUIAutomation();
-
-	// Initialise UIAutomation
-	if (FAILED(InitUIAutomation())) {
-		msga("Initializing UI Automation failed!");
-		return FALSE;
-	}
-		
-	SetWindowPos(ghPtMain, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-
-	// Getting the Emoji Text Edit control UIAutomation element to send text to Paltalk
-	HRESULT hr = GetUIAutomationElementFromHWNDAndClassName(ghPtMain, L"ui::controls::EmojiTextEdit", &emojiTextEditElement);
-	if (FAILED(hr)) {
-		OutputDebugStringA( "GetUIAutomationElementFromHWNDAndClassName failed: " );
-	}
-
-	// Finding the chat room window controls handles
-	EnumChildWindows(ghPtRoom, EnumPaltalkWindows, 0);
-
-	return TRUE;
-} */
-
 /// Enumeration Callback to Find the Control Windows
 BOOL CALLBACK EnumPaltalkWindows(HWND hWnd, LPARAM lParam)
 {
@@ -666,8 +609,7 @@ BOOL InitRichEdit(void)
 	return TRUE;
 }
 
-
-// Context Menu for the List Box
+// Context Menu for the List Box and Richedit control
 void CreateContextMenu(WPARAM wParam, LPARAM lparam)
 {
 	if ((HWND)wParam == ghList)
@@ -779,7 +721,6 @@ BOOL InitHunspell(void)
 // Using HungSpellChecker DLL with wchar_t string
 bool SpellCheckAndSuggest(wchar_t* wcRawWord)
 {
-
 	LONG lngCurPos = 0;
 	// Getting curser position
 	SendMessageW(ghRichEdit, EM_GETSEL, 0, (LPARAM)&lngCurPos);
@@ -867,7 +808,10 @@ bool SpellCheckAndSuggest(wchar_t* wcRawWord)
 	}
 	else if (uiSelect == 9992) // Look up the word on the Internet
 	{
-		LookupWebDictionary();
+		wchar_t szUrl[256] = { '\0' };
+		
+		swprintf_s(szUrl, L"https://dictionary.com/browse/%s ", wcRawWord);
+		ShellExecuteW(NULL, L"Open", szUrl, NULL, NULL, SW_NORMAL);
 		SendMessageW(ghRichEdit, EM_SETSEL, (WPARAM)lngCurPos, (LPARAM)lngCurPos);
 	}
 	else if (uiSelect == 9993) // Just ignore it
@@ -897,8 +841,6 @@ bool SpellCheckAndSuggest(wchar_t* wcRawWord)
 		hSpellMenu = NULL;
 	}
 	pDllHunspellFreeList(hSpell, &pwsSugList, iSug);
-
-	//MessageBox(ghMain, szRawWord, TEXT("spell checking"), MB_OK);
 
 	return TRUE;
 }
@@ -981,8 +923,7 @@ BOOL SendListItemTextToPaltalk(void)
 		lLen = SendMessageW(ghList, LB_GETTEXT, (WPARAM)lIndx, (LPARAM)pwcItemText);
 		if (lLen != 0)
 		{
-			// new function here
-			//CopyPasteToPaltalk(pwcItemText);
+			// Send the text to Paltalk
 			SendMessageToPaltalk(pwcItemText);
 			bRet = TRUE;
 		}
@@ -1269,6 +1210,7 @@ void SendMessageToPaltalk(wchar_t* szMsg)
 		}
 		
 		emojiTextEditElement->SetFocus();
+	
 		// Send the text 
 		pattern->SetValue(bstrOut);
 		SendMessageA(ghPtMain, WM_KEYDOWN, (WPARAM)VK_RETURN, 0);
@@ -1283,6 +1225,7 @@ void SendMessageToPaltalk(wchar_t* szMsg)
 	RestoreAndBringToFront(ghRichEdit);
 }
 
+/// Getting Nicknames from Paltalk ListView
 BOOL GetNicknames(void)
 {
 	if (!ghPtLv) return FALSE; // No Paltalk ListView handle
@@ -1367,7 +1310,7 @@ BOOL GetNicknames(void)
 	return TRUE;
 }
 
-// Adding the Nickname to the RichEdit
+/// Adding the Nickname to the RichEdit
 BOOL SendNick2Richedit(void)
 {
 	BOOL bRet = FALSE;
@@ -1585,7 +1528,7 @@ wstring ConvertToBold(const wstring& inString) {
 }
 
 // Personal Dictionary Management	
-// Get the directory of the running executable
+/// Get the directory of the running executable
 std::wstring GetExeDirectory()
 {
 	wchar_t path[MAX_PATH] = { 0 };
@@ -1594,13 +1537,13 @@ std::wstring GetExeDirectory()
 	return std::wstring(path);
 }
 
-// Get the full path to personal.dic	
+/// Get the full path to personal.dic	
 std::wstring GetPersonalDicPath()
 {
 	return GetExeDirectory() + L"\\personal.dic";
 }
 
-// Load personal.dic into a vector of UTF-8 strings
+/// Load personal.dic into a vector of UTF-8 strings
 std::vector<std::string> LoadPersonalDictionary(const std::wstring& file)
 {
 	std::vector<std::string> words;
@@ -1624,7 +1567,7 @@ std::vector<std::string> LoadPersonalDictionary(const std::wstring& file)
 	return words;
 }
 
-// Append a word to personal.dic if not already present (case-insensitive)	
+/// Append a word to personal.dic if not already present (case-insensitive)	
 void AppendToPersonalDic(const std::wstring& word)
 {
 	std::wstring personal = GetPersonalDicPath();
@@ -1650,7 +1593,7 @@ void AppendToPersonalDic(const std::wstring& word)
 	ofs.close();
 }
 
-// Helper: Convert between wide string and UTF-8
+/// Helper: Convert between wide string and UTF-8
 std::string WideToUtf8(const std::wstring& w)
 {
 	if (w.empty()) return std::string();
@@ -1661,7 +1604,7 @@ std::string WideToUtf8(const std::wstring& w)
 	return out;
 }
 
-// Helper: Convert from UTF-8 to wide string
+/// Helper: Convert from UTF-8 to wide string
 std::wstring Utf8ToWide(const std::string& s)
 {
 	if (s.empty()) return std::wstring();
@@ -1672,7 +1615,7 @@ std::wstring Utf8ToWide(const std::string& s)
 	return out;
 }
 
-// Restore the window and bring it to the front
+/// Restore the window and bring it to the front
 void RestoreAndBringToFront(HWND hWnd)
 {
 	if (!IsWindow(hWnd))
@@ -1790,3 +1733,6 @@ HRESULT __stdcall GetUIAutomationElementFromHWNDAndAutomationId(HWND hwnd, const
 
 	return S_OK;
 }
+
+/****************************************************************************************************************/
+/// Red dot related functions end here
